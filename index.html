@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Interview Confidence Coach</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #f3f4f6;
+  margin: 0;
+}
+
+header {
+  background: #4338ca;
+  color: white;
+  padding: 15px;
+  text-align: center;
+}
+
+.container {
+  max-width: 850px;
+  margin: 30px auto;
+  background: white;
+  padding: 25px;
+  border-radius: 10px;
+}
+
+.hidden { display: none; }
+
+button {
+  background: #4338ca;
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:hover { background: #3730a3; }
+
+input, textarea {
+  width: 100%;
+  padding: 10px;
+  margin-top: 8px;
+}
+
+.stats {
+  display: flex;
+  gap: 20px;
+  margin: 20px 0;
+}
+
+.stat {
+  flex: 1;
+  background: #eef2ff;
+  padding: 15px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.score-big {
+  font-size: 42px;
+  color: #16a34a;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>Interview Confidence Coach</h1>
+  <p>Practice • Improve • Succeed</p>
+</header>
+
+<div class="container">
+
+<!-- LOGIN -->
+<div id="loginBox">
+  <h2>Login / Signup</h2>
+  <input id="usernameInput" placeholder="Enter username" />
+  <button onclick="login()">Continue</button>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashboard" class="hidden">
+  <h2>Dashboard 👋 <span id="userLabel"></span></h2>
+
+  <div class="stats">
+    <div class="stat">
+      <h3 id="totalSessions">0</h3>
+      <p>Sessions</p>
+    </div>
+    <div class="stat">
+      <h3 id="avgScore">0</h3>
+      <p>Average</p>
+    </div>
+    <div class="stat">
+      <h3 id="bestScore">0</h3>
+      <p>Best</p>
+    </div>
+  </div>
+
+  <canvas id="scoreChart"></canvas>
+
+  <br>
+  <button onclick="startInterview()">Start Interview</button>
+  <button onclick="logout()">Logout</button>
+</div>
+
+<!-- INTERVIEW -->
+<div id="interview" class="hidden">
+  <h2 id="questionText"></h2>
+  <p>⏱ Time: <span id="time">25</span>s</p>
+
+  <textarea id="answerBox" rows="5"></textarea>
+
+  <br><br>
+  <button onclick="nextQuestion()">Next</button>
+</div>
+
+<!-- RESULT -->
+<div id="result" class="hidden">
+  <h2>Interview Finished 🎉</h2>
+  <p>Your Score:</p>
+  <div class="score-big" id="finalScore"></div>
+  <button onclick="goDashboard()">Back to Dashboard</button>
+</div>
+
+</div>
+
+<script>
+/* --------------------
+   STATE
+---------------------*/
+const QUESTIONS = [
+  "Tell me about yourself.",
+  "What are your strengths?",
+  "Describe a challenge you faced.",
+  "Why should we hire you?"
+];
+
+let index = 0;
+let time = 25;
+let timer;
+let chart;
+
+/* --------------------
+   AUTH
+---------------------*/
+function login() {
+  const name = document.getElementById("usernameInput").value.trim();
+  if (!name) return alert("Enter username");
+
+  localStorage.setItem("iccUser", name);
+  showDashboard();
+}
+
+function logout() {
+  localStorage.removeItem("iccUser");
+  location.reload();
+}
+
+/* --------------------
+   LOAD USER
+---------------------*/
+const currentUser = localStorage.getItem("iccUser");
+if (currentUser) showDashboard();
+
+/* --------------------
+   DASHBOARD
+---------------------*/
+function showDashboard() {
+  hideAll();
+  document.getElementById("dashboard").classList.remove("hidden");
+
+  const user = localStorage.getItem("iccUser");
+  document.getElementById("userLabel").innerText = user;
+
+  renderStats();
+  renderChart();
+}
+
+function getScores() {
+  return JSON.parse(localStorage.getItem("iccScores") || "[]");
+}
+
+function saveScore(score) {
+  const scores = getScores();
+  scores.push(score);
+  localStorage.setItem("iccScores", JSON.stringify(scores));
+}
+
+function renderStats() {
+  const scores = getScores();
+
+  const total = scores.length;
+  const avg = total
+    ? Math.round(scores.reduce((a,b)=>a+b,0)/total)
+    : 0;
+  const best = total ? Math.max(...scores) : 0;
+
+  document.getElementById("totalSessions").innerText = total;
+  document.getElementById("avgScore").innerText = avg;
+  document.getElementById("bestScore").innerText = best;
+}
+
+/* --------------------
+   CHART
+---------------------*/
+function renderChart() {
+  const scores = getScores();
+  const ctx = document.getElementById("scoreChart");
+
+  if (chart) chart.destroy();
+
+  chart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: scores.map((_, i) => "Session " + (i+1)),
+      datasets: [{
+        label: "Confidence Score",
+        data: scores,
+        borderWidth: 2,
+        fill: false
+      }]
+    }
+  });
+}
+
+/* --------------------
+   INTERVIEW
+---------------------*/
+function startInterview() {
+  hideAll();
+  document.getElementById("interview").classList.remove("hidden");
+
+  index = 0;
+  showQuestion();
+}
+
+function showQuestion() {
+  document.getElementById("questionText").innerText =
+    QUESTIONS[index];
+
+  document.getElementById("answerBox").value = "";
+
+  time = 25;
+  document.getElementById("time").innerText = time;
+
+  clearInterval(timer);
+
+  timer = setInterval(() => {
+    time--;
+    document.getElementById("time").innerText = time;
+    if (time === 0) nextQuestion();
+  }, 1000);
+}
+
+function nextQuestion() {
+  clearInterval(timer);
+  index++;
+
+  if (index < QUESTIONS.length) {
+    showQuestion();
+  } else {
+    finishInterview();
+  }
+}
+
+/* --------------------
+   RESULT
+---------------------*/
+function finishInterview() {
+  hideAll();
+  document.getElementById("result").classList.remove("hidden");
+
+  const score = Math.floor(Math.random()*30)+70;
+  document.getElementById("finalScore").innerText = score + "/100";
+
+  saveScore(score);
+}
+
+/* --------------------
+   NAV
+---------------------*/
+function goDashboard() {
+  showDashboard();
+}
+
+function hideAll() {
+  document
+    .querySelectorAll(".container > div")
+    .forEach(div => div.classList.add("hidden"));
+}
+</script>
+
+</body>
+</html>
