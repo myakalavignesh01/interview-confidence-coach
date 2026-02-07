@@ -149,6 +149,11 @@ let time = 25;
 let timer;
 let chart;
 
+let recognition;
+
+let sessionData = [];
+let questionStartTime;
+
 /* --------------------
    AUTH
 ---------------------*/
@@ -178,31 +183,37 @@ function showDashboard() {
   hideAll();
   document.getElementById("dashboard").classList.remove("hidden");
 
-  const user = localStorage.getItem("iccUser");
-  document.getElementById("userLabel").innerText = user;
+  document.getElementById("userLabel").innerText =
+    localStorage.getItem("iccUser");
 
   renderStats();
   renderChart();
 }
 
-function getScores() {
-  return JSON.parse(localStorage.getItem("iccScores") || "[]");
+function getSessions() {
+  return JSON.parse(localStorage.getItem("iccSessions") || "[]");
 }
 
-function saveScore(score) {
-  const scores = getScores();
-  scores.push(score);
-  localStorage.setItem("iccScores", JSON.stringify(scores));
+function saveSession(session) {
+  const sessions = getSessions();
+  sessions.push(session);
+  localStorage.setItem("iccSessions", JSON.stringify(sessions));
 }
 
 function renderStats() {
-  const scores = getScores();
+  const sessions = getSessions();
 
-  const total = scores.length;
+  const total = sessions.length;
+
   const avg = total
-    ? Math.round(scores.reduce((a,b)=>a+b,0)/total)
+    ? Math.round(
+        sessions.reduce((a,b)=>a+b.finalScore,0)/total
+      )
     : 0;
-  const best = total ? Math.max(...scores) : 0;
+
+  const best = total
+    ? Math.max(...sessions.map(s=>s.finalScore))
+    : 0;
 
   document.getElementById("totalSessions").innerText = total;
   document.getElementById("avgScore").innerText = avg;
@@ -213,7 +224,7 @@ function renderStats() {
    CHART
 ---------------------*/
 function renderChart() {
-  const scores = getScores();
+  const sessions = getSessions();
   const ctx = document.getElementById("scoreChart");
 
   if (chart) chart.destroy();
@@ -221,12 +232,11 @@ function renderChart() {
   chart = new Chart(ctx, {
     type: "line",
     data: {
-      labels: scores.map((_, i) => "Session " + (i+1)),
+      labels: sessions.map((_,i)=>"Session "+(i+1)),
       datasets: [{
         label: "Confidence Score",
-        data: scores,
-        borderWidth: 2,
-        fill: false
+        data: sessions.map(s=>s.finalScore),
+        borderWidth: 2
       }]
     }
   });
@@ -240,6 +250,8 @@ function startInterview() {
   document.getElementById("interview").classList.remove("hidden");
 
   index = 0;
+  sessionData = [];
+
   showQuestion();
 }
 
@@ -252,6 +264,10 @@ function showQuestion() {
   time = 25;
   document.getElementById("time").innerText = time;
 
+  questionStartTime = Date.now();
+
+  startSpeechRecognition();
+
   clearInterval(timer);
 
   timer = setInterval(() => {
@@ -263,6 +279,23 @@ function showQuestion() {
 
 function nextQuestion() {
   clearInterval(timer);
+  stopSpeechRecognition();
+
+  const answer =
+    document.getElementById("answerBox").value.trim();
+
+  const timeUsed =
+    Math.round((Date.now() - questionStartTime)/1000);
+
+  const metrics = analyzeAnswer(answer, timeUsed);
+
+  sessionData.push({
+    question: QUESTIONS[index],
+    answer,
+    timeUsed,
+    ...metrics
+  });
+
   index++;
 
   if (index < QUESTIONS.length) {
@@ -273,16 +306,107 @@ function nextQuestion() {
 }
 
 /* --------------------
-   RESULT
+   SPEECH TO TEXT
+---------------------*/
+function startSpeechRecognition() {
+  if (!("webkitSpeechRecognition" in window)) {
+    console.warn("Speech API not supported");
+    return;
+  }
+
+  recognition = new webkitSpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onresult = e => {
+    let transcript = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      transcript += e.results[i][0].transcript;
+    }
+    document.getElementById("answerBox").value = transcript;
+  };
+
+  recognition.start();
+}
+
+function stopSpeechRecognition() {
+  if (recognition) recognition.stop();
+}
+
+/* --------------------
+   ANALYSIS ENGINE
+---------------------*/
+function analyzeAnswer(text, timeUsed) {
+
+  const words =
+    text.split(/\s+/).filter(Boolean);
+
+  const fillers = ["um","uh","like","you know","basically"];
+
+  let fillerCount = 0;
+
+  fillers.forEach(f=>{
+    fillerCount +=
+      (text.toLowerCase().match(new RegExp(f,"g")) || []).length;
+  });
+
+  let score = 50;
+
+  // length factor
+  score += Math.min(words.length, 80) * 0.4;
+
+  // filler penalty
+  score -= fillerCount * 3;
+
+  // timing factor
+  if (timeUsed >= 10 && timeUsed <= 25) score += 10;
+  if (timeUsed < 5) score -= 10;
+
+  score = Math.max(30, Math.min(100, score));
+
+  return {
+    wordCount: words.length,
+    fillerCount,
+    questionScore: Math.round(score)
+  };
+}
+
+/* --------------------
+   FINAL RESULT
 ---------------------*/
 function finishInterview() {
   hideAll();
   document.getElementById("result").classList.remove("hidden");
 
-  const score = Math.floor(Math.random()*30)+70;
-  document.getElementById("finalScore").innerText = score + "/100";
+  const finalScore = Math.round(
+    sessionData.reduce((a,b)=>a+b.questionScore,0) /
+    sessionData.length
+  );
 
-  saveScore(score);
+  document.getElementById("finalScore").innerText =
+    finalScore + "/100";
+
+  saveSession({
+    date: new Date().toISOString(),
+    finalScore,
+    questions: sessionData
+  });
+}
+
+/* --------------------
+   AI READY HOOK
+---------------------*/
+async function evaluateWithAI(question, answer) {
+
+  // 🔌 CALL YOUR BACKEND LATER:
+  // POST /api/evaluate
+
+  return {
+    clarity: 82,
+    structure: 78,
+    confidence: 85,
+    suggestions: "Reduce fillers and open with a strong summary."
+  };
 }
 
 /* --------------------
@@ -298,6 +422,7 @@ function hideAll() {
     .forEach(div => div.classList.add("hidden"));
 }
 </script>
+
 
 </body>
 </html>
